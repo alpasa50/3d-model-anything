@@ -4,6 +4,8 @@ name: Build iOS app (unsigned IPA)
 # WITHOUT any signing. The resulting .ipa is signed later on your own PC
 # with Sideloadly + your Apple ID (free provisioning, 7-day expiry).
 # Trigger it manually: Actions tab -> "Build iOS app (unsigned IPA)" -> Run workflow.
+# v3: on failure, the compiler errors are written to the job SUMMARY page
+# (publicly readable) so they can be diagnosed without digging in the log.
 
 on:
   workflow_dispatch:
@@ -17,6 +19,12 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Show environment
+        run: |
+          ls /Applications | grep -i xcode || true
+          xcodebuild -version || true
+          swift --version || true
 
       - name: Select latest stable Xcode
         uses: maxim-lobanov/setup-xcode@v1
@@ -33,6 +41,7 @@ jobs:
       - name: Build app (unsigned, Release, generic iOS device)
         working-directory: apps/house-capture
         run: |
+          set -o pipefail
           xcodebuild \
             -project HouseCapture.xcodeproj \
             -scheme HouseCapture \
@@ -42,7 +51,38 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
-            build
+            build 2>&1 | tee build-full.log
+
+      - name: Publish compiler errors to job summary (only on failure)
+        if: failure()
+        working-directory: apps/house-capture
+        run: |
+          {
+            echo "## Compiler errors"
+            echo '```'
+            grep -n -m 80 -E "error:" build-full.log || echo "(no lines matched 'error:')"
+            echo '```'
+            echo "## Context around first error"
+            echo '```'
+            FIRST=$(grep -n -m 1 -E "error:" build-full.log | cut -d: -f1 || true)
+            if [ -n "$FIRST" ]; then
+              START=$((FIRST > 15 ? FIRST - 15 : 1))
+              END=$((FIRST + 25))
+              sed -n "${START},${END}p" build-full.log
+            fi
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "===== FIRST COMPILER ERRORS ====="
+          grep -n -m 60 -E "error:" build-full.log || true
+          echo "===== END ====="
+
+      - name: Upload build log (only on failure)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-log
+          path: apps/house-capture/build-full.log
+          if-no-files-found: ignore
 
       - name: Package unsigned .ipa
         working-directory: apps/house-capture
