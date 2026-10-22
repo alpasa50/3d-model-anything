@@ -757,11 +757,18 @@ final class CoverageEngine: @unchecked Sendable {
       let x = simd_make_float3(t.columns.0), y = simd_make_float3(t.columns.1), z = simd_make_float3(t.columns.2)
       let c = simd_make_float3(t.columns.3)
       // top + four sides
-      for (off, n, w, h, ax, ay) in [
-        (y * d.y / 2, y, d.x, d.z, x, z),
-        (z * d.z / 2, z, d.x, d.y, x, y), (-z * d.z / 2, -z, d.x, d.y, x, y),
-        (x * d.x / 2, x, d.z, d.y, z, y), (-x * d.x / 2, -x, d.z, d.y, z, y),
-      ] {
+      // (Broken into typed sub-expressions: the single literal below made the
+      // Swift type checker time out on Xcode < 27 — "unable to type-check this
+      // expression in reasonable time". Same math, same order.)
+      let topOff = (y * d.y) / 2
+      let frontOff = (z * d.z) / 2
+      let sideOff = (x * d.x) / 2
+      let faces: [(off: SIMD3<Float>, n: SIMD3<Float>, w: Float, h: Float, ax: SIMD3<Float>, ay: SIMD3<Float>)] = [
+        (topOff, y, d.x, d.z, x, z),
+        (frontOff, z, d.x, d.y, x, y), (-frontOff, -z, d.x, d.y, x, y),
+        (sideOff, x, d.z, d.y, z, y), (-sideOff, -x, d.z, d.y, z, y),
+      ]
+      for (off, n, w, h, ax, ay) in faces {
         var m = matrix_identity_float4x4
         m.columns.0 = SIMD4(ax, 0); m.columns.1 = SIMD4(ay, 0); m.columns.2 = SIMD4(n, 0); m.columns.3 = SIMD4(c + off, 1)
         surface(m, w, h, n)
